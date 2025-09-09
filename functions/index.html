@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Paracetamol Poisoning Calculator</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-functions-compat.js"></script>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 30px auto; padding: 20px; }
+    .section { margin: 20px 0; padding: 15px; background: #f9f9f9; border-radius: 8px; }
+    button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    .result { margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #28a745; }
+    .warning { background: #fff3cd; border-left: 4px solid #ffc107; }
+  </style>
+</head>
+<body>
+  <h1>Paracetamol Poisoning Risk Calculator</h1>
+
+  <div class="section">
+    <h3>Step 1: Ingestion Type</h3>
+    <label><input type="radio" name="ingestion" value="chronic" onchange="toggleIngestion()"> Chronic (Therapeutic doses over time)</label><br>
+    <label><input type="radio" name="ingestion" value="acute" onchange="toggleIngestion()"> Acute Toxic Dose</label>
+  </div>
+
+  <div id="acuteOptions" class="section" style="display:none">
+    <h3>Step 2: Acute Ingestion Pattern</h3>
+    <label><input type="radio" name="pattern" value="single"> Single Ingestion</label><br>
+    <label><input type="radio" name="pattern" value="multiple"> Multiple Ingestions</label>
+  </div>
+
+  <div id="timeInputs" class="section" style="display:none">
+    <h3>Step 3: Timing</h3>
+    <label>First Ingestion Time (HH:MM 24h): <input type="text" id="firstIngestion" placeholder="e.g. 14:30"></label><br><br>
+    <label>Latest Ingestion Time (HH:MM 24h): <input type="text" id="latestIngestion" placeholder="e.g. 16:45"></label><br><br>
+    <label>First Sampling Time (HH:MM 24h): <input type="text" id="samplingTime" placeholder="e.g. 21:00"></label><br><br>
+    <label>Measured Paracetamol Level (μmol/L): <input type="number" id="level" step="0.1"></label>
+  </div>
+
+  <button onclick="calculateRisk()">Calculate Risk</button>
+
+  <div id="result" class="result" style="display:none"></div>
+
+  <div style="background:#ffebee; padding:15px; margin-top:30px; border-left:4px solid #c62828;">
+    <strong>DISCLAIMER:</strong> This calculator is for educational purposes only. 
+    It does not replace clinical judgment. Always consult a toxicologist.
+  </div>
+
+  <script>
+    // ⚠️ REPLACE WITH YOUR FIREBASE CONFIG FROM CONSOLE
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const functions = firebase.functions();
+
+    function toggleIngestion() {
+      const ingestion = document.querySelector('input[name="ingestion"]:checked')?.value;
+      const acuteDiv = document.getElementById('acuteOptions');
+      const timeDiv = document.getElementById('timeInputs');
+      if (ingestion === 'acute') {
+        acuteDiv.style.display = 'block';
+      } else {
+        acuteDiv.style.display = 'none';
+        timeDiv.style.display = 'none';
+      }
+    }
+
+    document.querySelectorAll('input[name="pattern"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.getElementById('timeInputs').style.display = 'block';
+      });
+    });
+
+    async function calculateRisk() {
+      const ingestion = document.querySelector('input[name="ingestion"]:checked')?.value;
+      const pattern = document.querySelector('input[name="pattern"]:checked')?.value;
+      const firstIngestion = document.getElementById('firstIngestion').value;
+      const latestIngestion = document.getElementById('latestIngestion').value;
+      const samplingTime = document.getElementById('samplingTime').value;
+      const level = parseFloat(document.getElementById('level').value);
+
+      if (!ingestion || (ingestion === 'acute' && !pattern) || !firstIngestion || !latestIngestion || !samplingTime || isNaN(level)) {
+        alert("Please fill all fields.");
+        return;
+      }
+
+      const calculateFn = firebase.functions().httpsCallable('calculateParacetamolRisk');
+      try {
+        const result = await calculateFn({
+          ingestionType: ingestion,
+          ingestionPattern: pattern,
+          firstIngestion,
+          latestIngestion,
+          samplingTime,
+          level
+        });
+
+        displayResult(result.data);
+      } catch (error) {
+        document.getElementById('result').innerHTML = `<strong>Error:</strong> ${error.message}`;
+        document.getElementById('result').style.display = 'block';
+      }
+    }
+
+    function displayResult(data) {
+      const resultDiv = document.getElementById('result');
+      let html = `<h3>Result</h3><p><strong>Risk Level:</strong> ${data.risk}</p>`;
+      
+      if (data.message) html += `<p>${data.message}</p>`;
+      if (data.treatmentThreshold) html += `<p><strong>Treatment Threshold at this time:</strong> ${data.treatmentThreshold.toFixed(1)} μmol/L</p>`;
+      if (data.aboveTherapeutic) html += `<p class="warning"><strong>⚠️ Above therapeutic level — consider NAC treatment.</strong></p>`;
+
+      resultDiv.innerHTML = html;
+      resultDiv.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
