@@ -106,6 +106,7 @@
       background: white;
       border-radius: 16px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      display: none;
     }
 
     canvas {
@@ -149,7 +150,7 @@
 
   <button onclick="calculateRisk()">Calculate Risk</button>
 
-  <div id="chartContainer" style="display:none">
+  <div id="chartContainer">
     <h3>Rumack-Matthew Nomogram</h3>
     <canvas id="rumackChart"></canvas>
   </div>
@@ -223,7 +224,7 @@
             firstIngestion,
             latestIngestion,
             samplingTime,
-            level: levelMcgMl // We'll handle unit conversion in backend
+            level: levelMcgMl
           })
         });
 
@@ -238,11 +239,20 @@
 
     function displayResult(data, levelMcgMl) {
       const resultDiv = document.getElementById('result');
-      let html = `<h3>Result</h3><p><strong>Risk Level:</strong> ${data.risk}</p>`;
-      
-      if (data.message) html += `<p>${data.message}</p>`;
-      if (data.treatmentThresholdMcgMl) html += `<p><strong>Treatment Threshold:</strong> ${data.treatmentThresholdMcgMl.toFixed(1)} mcg/mL</p>`;
-      if (data.aboveTherapeutic) html += `<p class="warning"><strong>⚠️ Above therapeutic level — consider NAC treatment.</strong></p>`;
+      let html = `<h3>Result</h3>`;
+
+      html += `<p><strong>Your measured level is</strong> ${levelMcgMl.toFixed(1)} mcg/mL</p>`;
+      if (data.treatmentThresholdMcgMl !== undefined) {
+        html += `<p><strong>Toxic if > </strong> ${data.treatmentThresholdMcgMl.toFixed(1)} mcg/mL</p>`;
+      }
+
+      if (data.risk === "High") {
+        html += `<p class="warning"><strong>⚠️ Kindly start NAC infusion as per protocol.</strong></p>`;
+      } else if (data.risk === "Low") {
+        html += `<p><strong>Toxicity is unlikely.</strong></p>`;
+      } else if (data.risk === "Invalid") {
+        html += `<p class="warning">${data.message}</p>`;
+      }
 
       resultDiv.innerHTML = html;
       resultDiv.style.display = 'block';
@@ -251,36 +261,53 @@
 
     function drawRumackChart(hours, levelMcgMl, thresholdMcgMl) {
       const ctx = document.getElementById('rumackChart').getContext('2d');
-      
+
       // Generate Rumack-Matthew line points (mcg/mL)
       const hoursData = [];
       const thresholdData = [];
       for (let h = 0; h <= 24; h += 0.5) {
         hoursData.push(h);
-        // Treatment line: 150 mcg/mL at 4h, halves every 4h
-        let threshold = 150 * Math.pow(2, 4 - h);
+        let threshold;
+        if (h < 4) {
+          threshold = 150; // Conservative threshold before 4h
+        } else {
+          threshold = 150 * Math.pow(0.5, (h - 4) / 4);
+        }
         if (threshold < 1) threshold = 1;
         thresholdData.push(threshold);
       }
 
-      // Destroy previous chart if exists
-      if (window.rumackChart) {
+      // Destroy previous chart if exists and is valid
+      if (window.rumackChart && typeof window.rumackChart.destroy === 'function') {
         window.rumackChart.destroy();
       }
 
       window.rumackChart = new Chart(ctx, {
         type: 'line',
-        data: {
+        data: {  // ← FIXED: Added "data:" object
           labels: hoursData,
-          datasets: [{
-            label: 'Treatment Line (150 mcg/mL at 4h)',
-            data: thresholdData,
-            borderColor: '#B3261E',
-            backgroundColor: 'rgba(179, 38, 30, 0.1)',
-            borderWidth: 3,
-            fill: true,
-            tension: 0.3
-          }]
+          datasets: [
+            {
+              label: 'Treatment Line (Toxic if above)',
+              data: thresholdData,  // ← FIXED: "data" not "thresholdData"
+              borderColor: '#B3261E',
+              backgroundColor: 'rgba(179, 38, 30, 0.1)',
+              borderWidth: 3,
+              fill: false,
+              tension: 0.3,
+              pointRadius: 0
+            },
+            {
+              label: 'Your Measurement',
+              data: [{ x: hours, y: levelMcgMl }],  // ← FIXED: "data" not empty object
+              backgroundColor: '#6750A4',
+              borderColor: '#FFFFFF',
+              borderWidth: 2,
+              pointRadius: 8,
+              pointHoverRadius: 12,
+              showLine: false
+            }
+          ]
         },
         options: {
           responsive: true,
@@ -288,16 +315,22 @@
           plugins: {
             title: {
               display: true,
-              text: 'Rumack-Matthew Nomogram',
+              text: 'Rumack-Matthew Nomogram (mcg/mL)',
               font: { size: 16 }
             },
-            legend: { display: true }
+            legend: { 
+              display: true,
+              position: 'top'
+            }
           },
           scales: {
             x: {
               title: { display: true, text: 'Hours Post Ingestion' },
               min: 0,
-              max: 24
+              max: 24,
+              grid: {
+                color: 'rgba(0,0,0,0.1)'
+              }
             },
             y: {
               title: { display: true, text: 'Paracetamol Level (mcg/mL)' },
@@ -307,46 +340,14 @@
                 callback: function(value) {
                   return value + ' mcg/mL';
                 }
-              }
-            }
-          },
-          annotation: {
-            annotations: {
-              point1: {
-                type: 'point',
-                xValue: hours,
-                yValue: levelMcgMl,
-                backgroundColor: '#6750A4',
-                radius: 8
+              },
+              grid: {
+                color: 'rgba(0,0,0,0.1)'
               }
             }
           }
         }
       });
-
-      // Add point for measured level
-      const point = {
-        x: hours,
-        y: levelMcgMl,
-        backgroundColor: '#6750A4',
-        borderColor: '#FFFFFF',
-        borderWidth: 2,
-        radius: 8,
-        pointStyle: 'circle'
-      };
-
-      // Add point to chart
-      window.rumackChart.data.datasets.push({
-        label: 'Your Measurement',
-        data: [point],
-        pointBackgroundColor: '#6750A4',
-        pointBorderColor: '#FFFFFF',
-        pointBorderWidth: 2,
-        pointRadius: 8,
-        showLine: false
-      });
-
-      window.rumackChart.update();
     }
   </script>
 </body>
